@@ -7,7 +7,7 @@ import { ReasoningPanel } from "./components/ReasoningPanel";
 import { FactCheckView } from "./components/FactCheckView";
 import { buildFeed } from "./lib/feed";
 import { TODAY_KEY, formatLong } from "./lib/dates";
-import { fetchClusters } from "./data/api";
+import { fetchClusters, type DataSource } from "./data/api";
 import { getClustersForDate } from "./data/archive";
 import { collectFactChecks, searchFactChecks, type FactCheckFilters } from "./lib/factcheck";
 import type { Article, Region, StoryCluster } from "./types";
@@ -31,7 +31,7 @@ export default function App() {
   // Live data loading state
   const [clusters, setClusters] = useState<StoryCluster[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [dataSource, setDataSource] = useState<DataSource>("demo");
 
   // Cancel stale fetches when region/date changes.
   const fetchSeqRef = useRef(0);
@@ -39,20 +39,14 @@ export default function App() {
   useEffect(() => {
     const seq = ++fetchSeqRef.current;
     setLoading(true);
-    setError(null);
     setSelectedId(null);
 
-    fetchClusters(region, dateKey)
-      .then((data) => {
-        if (seq !== fetchSeqRef.current) return; // superseded
-        setClusters(data);
-        setLoading(false);
-      })
-      .catch((err: Error) => {
-        if (seq !== fetchSeqRef.current) return;
-        setError(err.message);
-        setLoading(false);
-      });
+    fetchClusters(region, dateKey).then(({ clusters: data, source }) => {
+      if (seq !== fetchSeqRef.current) return; // superseded
+      setClusters(data);
+      setDataSource(source);
+      setLoading(false);
+    });
   }, [region, dateKey]);
 
   const feed = useMemo(
@@ -181,17 +175,16 @@ export default function App() {
                       </div>
                     )}
 
-                    {!loading && error && (
-                      <div className="rounded-xl border border-coral/40 bg-white p-6 text-center text-sm text-coral shadow-sm">
-                        <p className="font-semibold">Could not load news</p>
-                        <p className="mt-1 text-xs text-navy/60">{error}</p>
-                        <p className="mt-2 text-xs text-navy/50">
-                          Make sure the API server is running and your GUARDIAN_API_KEY is set in <code>.env</code>.
-                        </p>
+                    {!loading && dataSource === "demo" && (
+                      <div className="rounded-lg border border-cyan/40 bg-ice px-4 py-2 text-xs text-navy/70">
+                        <span className="font-semibold text-teal">Demo mode · </span>
+                        Showing illustrative data. Start the API server and add your{" "}
+                        <code className="rounded bg-white px-1">GUARDIAN_API_KEY</code>{" "}
+                        to <code className="rounded bg-white px-1">.env</code> for live news.
                       </div>
                     )}
 
-                    {!loading && !error && feed.length === 0 && (
+                    {!loading && feed.length === 0 && (
                       <div className="bg-white p-8 text-center text-sm text-navy/70 shadow-sm">
                         No events in {region} for this day
                         {majorOnly ? " from major channels" : ""}.
@@ -202,7 +195,6 @@ export default function App() {
                     )}
 
                     {!loading &&
-                      !error &&
                       feed.map((item) => (
                         <ClusterCard
                           key={item.cluster.id}

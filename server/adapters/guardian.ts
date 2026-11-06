@@ -1,7 +1,7 @@
 import type { Article, Publisher, Region, StoryCluster } from "../../src/types.js";
 import { resolvePublisher } from "../utils/publisherMeta.js";
 
-const BASE = "https://content.guardianapi.com/search";
+const BASE = "https://content.guardianapis.com/search";
 
 /** Guardian section IDs for each app region. */
 const SECTION_MAP: Record<Region, string> = {
