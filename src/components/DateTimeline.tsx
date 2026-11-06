@@ -80,7 +80,7 @@ export function DateTimeline({ selected, onSelect, countFor }: DateTimelineProps
               <span className="text-base font-semibold">{day}</span>
               <span className="mt-1 flex items-center gap-1 text-[10px] opacity-80">
                 <span className={`h-1.5 w-1.5 rounded-full ${active ? "bg-white" : "bg-cyan"}`} />
-                {count} {count === 1 ? "event" : "events"}
+                {count < 0 ? "·" : `${count} ${count === 1 ? "event" : "events"}`}
               </span>
             </button>
           );

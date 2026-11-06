@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Header } from "./components/Header";
 import { GlobePane } from "./components/GlobePane";
 import { DateTimeline } from "./components/DateTimeline";
@@ -7,9 +7,10 @@ import { ReasoningPanel } from "./components/ReasoningPanel";
 import { FactCheckView } from "./components/FactCheckView";
 import { buildFeed } from "./lib/feed";
 import { TODAY_KEY, formatLong } from "./lib/dates";
+import { fetchClusters } from "./data/api";
 import { getClustersForDate } from "./data/archive";
 import { collectFactChecks, searchFactChecks, type FactCheckFilters } from "./lib/factcheck";
-import type { Article, Region } from "./types";
+import type { Article, Region, StoryCluster } from "./types";
 
 type Mode = "news" | "factcheck";
 
@@ -21,19 +22,46 @@ const MODE_TABS: { id: Mode; label: string }[] = [
 export default function App() {
   const [mode, setMode] = useState<Mode>("news");
 
-  // Daily news state
+  // --- Daily news state ---
   const [region, setRegion] = useState<Region>("Europe");
   const [majorOnly, setMajorOnly] = useState(true);
   const [dateKey, setDateKey] = useState(TODAY_KEY);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // Fact-check state
-  const [factFilters, setFactFilters] = useState<FactCheckFilters>({ text: "", publisher: "all", verdict: "all" });
-  const [selectedFactKey, setSelectedFactKey] = useState<string | null>(null);
+  // Live data loading state
+  const [clusters, setClusters] = useState<StoryCluster[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const clusters = useMemo(() => getClustersForDate(dateKey), [dateKey]);
-  const feed = useMemo(() => buildFeed(clusters, { region, majorOnly }), [clusters, region, majorOnly]);
-  const countFor = (r: Region) => buildFeed(clusters, { region: r, majorOnly }).length;
+  // Cancel stale fetches when region/date changes.
+  const fetchSeqRef = useRef(0);
+
+  useEffect(() => {
+    const seq = ++fetchSeqRef.current;
+    setLoading(true);
+    setError(null);
+    setSelectedId(null);
+
+    fetchClusters(region, dateKey)
+      .then((data) => {
+        if (seq !== fetchSeqRef.current) return; // superseded
+        setClusters(data);
+        setLoading(false);
+      })
+      .catch((err: Error) => {
+        if (seq !== fetchSeqRef.current) return;
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [region, dateKey]);
+
+  const feed = useMemo(
+    () => buildFeed(clusters, { region, majorOnly }),
+    [clusters, region, majorOnly]
+  );
+
+  const countFor = (r: Region) =>
+    r === region ? feed.length : -1; // -1 = unknown for non-loaded regions
 
   const visibleArticles = useMemo(() => feed.flatMap((item) => item.articles), [feed]);
   const activeArticle: Article | null =
@@ -44,24 +72,36 @@ export default function App() {
   const totalClaims = visibleArticles.reduce((sum, a) => sum + a.claims.length, 0);
   const isToday = dateKey === TODAY_KEY;
 
+  // --- Fact-check state (uses mock data) ---
+  const [factFilters, setFactFilters] = useState<FactCheckFilters>({
+    text: "",
+    publisher: "all",
+    verdict: "all",
+  });
+  const [selectedFactKey, setSelectedFactKey] = useState<string | null>(null);
+
   const allFacts = useMemo(() => collectFactChecks(), []);
-  // Claims limited to the selected region
-  const regionFacts = useMemo(() => allFacts.filter((r) => r.region === region), [allFacts, region]);
-  const factResults = useMemo(() => searchFactChecks(regionFacts, factFilters), [regionFacts, factFilters]);
+  const regionFacts = useMemo(
+    () => allFacts.filter((r) => r.region === region),
+    [allFacts, region]
+  );
+  const factResults = useMemo(
+    () => searchFactChecks(regionFacts, factFilters),
+    [regionFacts, factFilters]
+  );
   const publisherNames = useMemo(
     () => Array.from(new Set(regionFacts.map((r) => r.article.publisher.name))).sort(),
     [regionFacts]
   );
-  const activeFact = factResults.find((r) => r.key === selectedFactKey) ?? factResults[0] ?? null;
+  const activeFact =
+    factResults.find((r) => r.key === selectedFactKey) ?? factResults[0] ?? null;
 
   const handleRegion = (r: Region) => {
     setRegion(r);
-    setSelectedId(null);
     setFactFilters((f) => ({ ...f, publisher: "all" }));
   };
   const handleDate = (key: string) => {
     setDateKey(key);
-    setSelectedId(null);
   };
 
   return (
@@ -72,7 +112,11 @@ export default function App() {
         <GlobePane region={region} onRegionChange={handleRegion} countFor={countFor} />
 
         <main className="min-w-0 flex-1 space-y-6 px-4 py-6 sm:px-6">
-          <div role="tablist" aria-label="View" className="inline-flex rounded-md border border-cyan bg-white p-1 text-sm">
+          <div
+            role="tablist"
+            aria-label="View"
+            className="inline-flex rounded-md border border-cyan bg-white p-1 text-sm"
+          >
             {MODE_TABS.map((tab) => {
               const active = mode === tab.id;
               return (
@@ -97,7 +141,9 @@ export default function App() {
               <DateTimeline
                 selected={dateKey}
                 onSelect={handleDate}
-                countFor={(key) => getClustersForDate(key).length}
+                countFor={(key) =>
+                  key === dateKey ? feed.length : getClustersForDate(key).length
+                }
               />
 
               <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
@@ -113,52 +159,96 @@ export default function App() {
                           {formatLong(dateKey)}
                         </span>
                       </h2>
-                      <p className="text-xs text-navy/70">
-                        {feed.length} {feed.length === 1 ? "event" : "events"} · {visibleArticles.length} sources ·{" "}
-                        {totalClaims} claims · {majorOnly ? "Major global only" : "All channels"}
-                      </p>
+                      {!loading && (
+                        <p className="text-xs text-navy/70">
+                          {feed.length} {feed.length === 1 ? "event" : "events"} ·{" "}
+                          {visibleArticles.length} sources · {totalClaims} claims ·{" "}
+                          {majorOnly ? "Major global only" : "All channels"}
+                        </p>
+                      )}
                     </div>
                   </div>
 
                   <section aria-label="News list" className="space-y-5">
-                    {feed.length === 0 && (
+                    {loading && (
+                      <div className="flex flex-col gap-3">
+                        {[1, 2, 3].map((i) => (
+                          <div
+                            key={i}
+                            className="h-32 animate-pulse rounded-xl bg-ice"
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    {!loading && error && (
+                      <div className="rounded-xl border border-coral/40 bg-white p-6 text-center text-sm text-coral shadow-sm">
+                        <p className="font-semibold">Could not load news</p>
+                        <p className="mt-1 text-xs text-navy/60">{error}</p>
+                        <p className="mt-2 text-xs text-navy/50">
+                          Make sure the API server is running and your GUARDIAN_API_KEY is set in <code>.env</code>.
+                        </p>
+                      </div>
+                    )}
+
+                    {!loading && !error && feed.length === 0 && (
                       <div className="bg-white p-8 text-center text-sm text-navy/70 shadow-sm">
                         No events in {region} for this day
                         {majorOnly ? " from major channels" : ""}.
-                        {majorOnly ? ' Turn off "Major Global Channels Only" to include regional networks.' : ""}
+                        {majorOnly
+                          ? ' Turn off "Major Global Channels Only" to include regional networks.'
+                          : ""}
                       </div>
                     )}
-                    {feed.map((item) => (
-                      <ClusterCard
-                        key={item.cluster.id}
-                        item={item}
-                        selectedId={activeArticle?.id ?? null}
-                        onSelect={setSelectedId}
-                      />
-                    ))}
+
+                    {!loading &&
+                      !error &&
+                      feed.map((item) => (
+                        <ClusterCard
+                          key={item.cluster.id}
+                          item={item}
+                          selectedId={activeArticle?.id ?? null}
+                          onSelect={setSelectedId}
+                        />
+                      ))}
                   </section>
                 </div>
 
                 <aside className="xl:sticky xl:top-20 xl:self-start">
-                  <ReasoningPanel article={activeArticle} clusterTitle={activeClusterTitle} />
+                  <ReasoningPanel
+                    article={activeArticle}
+                    clusterTitle={activeClusterTitle}
+                  />
                 </aside>
               </div>
             </>
           ) : (
-            <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-              <FactCheckView
-                region={region}
-                filters={factFilters}
-                onFiltersChange={setFactFilters}
-                publishers={publisherNames}
-                results={factResults}
-                selectedKey={activeFact?.key ?? null}
-                onSelect={setSelectedFactKey}
-              />
-              <aside className="xl:sticky xl:top-20 xl:self-start">
-                <ReasoningPanel article={activeFact?.article ?? null} clusterTitle={activeFact?.clusterTitle} />
-              </aside>
-            </div>
+            <>
+              {/* Demo-data notice for the fact-check view */}
+              <div className="rounded-lg border border-cyan/40 bg-ice px-4 py-2 text-xs text-navy/70">
+                <span className="font-semibold text-teal">Demo mode · </span>
+                The fact-check database uses illustrative data. Live AI claim extraction
+                for real-time articles is not yet available.
+              </div>
+
+              <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+                <FactCheckView
+                  region={region}
+                  filters={factFilters}
+                  onFiltersChange={setFactFilters}
+                  publishers={publisherNames}
+                  results={factResults}
+                  selectedKey={activeFact?.key ?? null}
+                  onSelect={setSelectedFactKey}
+                />
+                <aside className="xl:sticky xl:top-20 xl:self-start">
+                  <ReasoningPanel
+                    article={activeFact?.article ?? null}
+                    clusterTitle={activeFact?.clusterTitle}
+                  />
+                </aside>
+              </div>
+            </>
           )}
         </main>
       </div>

@@ -28,7 +28,9 @@ export function ReasoningPanel({ article, clusterTitle }: ReasoningPanelProps) {
     >
       <header className="space-y-3 border-b border-deep p-5">
         <div className="flex items-center justify-between">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-aqua">AI Reasoning Panel</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-aqua">
+            AI Reasoning Panel
+          </p>
           <span className="rounded-full bg-teal/30 px-2 py-0.5 text-[11px] text-ice">
             {article.claims.length} claims
           </span>
@@ -40,7 +42,9 @@ export function ReasoningPanel({ article, clusterTitle }: ReasoningPanelProps) {
             {article.publisher.name}
             {clusterTitle ? ` · ${clusterTitle}` : ""}
           </p>
-          <h3 className="mt-1 font-serif text-lg font-semibold leading-snug">{article.headline}</h3>
+          <h3 className="mt-1 font-serif text-lg font-semibold leading-snug">
+            {article.headline}
+          </h3>
         </div>
 
         <BiasSpectrum score={article.leanScore} />
@@ -56,14 +60,28 @@ export function ReasoningPanel({ article, clusterTitle }: ReasoningPanelProps) {
       </header>
 
       <div className="space-y-3 p-5">
-        <p className="text-[11px] uppercase tracking-wider text-ice/60">
-          Extracted claims · hover or focus for evidence
-        </p>
-        <ul className="space-y-3">
-          {article.claims.map((claim) => (
-            <ClaimRow key={claim.id} claim={claim} />
-          ))}
-        </ul>
+        {article.claims.length === 0 ? (
+          <div className="rounded-lg border border-deep bg-deep/40 p-4 text-center">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-aqua">
+              Live article
+            </p>
+            <p className="mt-1 text-xs text-ice/70">
+              AI fact-check analysis is not yet available for real-time news.
+              Claims are extracted offline for archived stories.
+            </p>
+          </div>
+        ) : (
+          <>
+            <p className="text-[11px] uppercase tracking-wider text-ice/60">
+              Extracted claims · hover or focus for evidence
+            </p>
+            <ul className="space-y-3">
+              {article.claims.map((claim) => (
+                <ClaimRow key={claim.id} claim={claim} />
+              ))}
+            </ul>
+          </>
+        )}
       </div>
     </section>
   );
@@ -77,7 +95,9 @@ function ClaimRow({ claim }: { claim: Claim }) {
       </ClaimTooltip>
       <div className="mt-2 flex items-center gap-2 text-[11px]">
         <VerdictChip claim={claim} />
-        <span className="text-ice/70">Confidence {Math.round(claim.confidence * 100)}%</span>
+        <span className="text-ice/70">
+          Confidence {Math.round(claim.confidence * 100)}%
+        </span>
       </div>
     </li>
   );
